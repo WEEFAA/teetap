@@ -17,6 +17,19 @@ cmd_path() {
     project_dir
 }
 
+# The dir key hashes the source path one-way; the breadcrumb preserves the
+# mapping so `list` can show where each project lives. Dotfile: invisible
+# to the "$dir"/* globs in status/off, and deliberately survives `off`.
+ensure_project_dir() {
+    dir=$(project_dir)
+    mkdir -p "$dir"
+    if [ ! -f "$dir/.teetap-project" ]; then
+        top=$(git rev-parse --show-toplevel 2>/dev/null) || top=$PWD
+        printf '%s\n' "$top" > "$dir/.teetap-project"
+    fi
+    printf '%s\n' "$dir"
+}
+
 now_iso() {
     date '+%Y-%m-%dT%H:%M:%S%z'
 }
@@ -37,8 +50,7 @@ write_end_marker() { # file session_id name exit_code
 
 cmd_pipe() {
     name=${1:?usage: teetap pipe <name>}
-    dir=$(project_dir)
-    mkdir -p "$dir"
+    dir=$(ensure_project_dir)
     file="$dir/$name.log"
     sid="$(date +%Y%m%dT%H%M%S).$$"
     write_start_marker "$file" "$name" "$sid"
@@ -62,8 +74,7 @@ cmd_run() {
     shift
     [ $# -gt 0 ] || { echo 'teetap run: no command given' >&2; exit 2; }
 
-    dir=$(project_dir)
-    mkdir -p "$dir"
+    dir=$(ensure_project_dir)
     sid="$(date +%Y%m%dT%H%M%S).$$"
     file="$dir/$name.log"
     case "$lifecycle" in
@@ -86,8 +97,7 @@ cmd_pm2() {
     shift
     src="${TEETAP_PM2_LOGS:-$HOME/.pm2/logs}"
     [ -d "$src" ] || { printf 'teetap: pm2 log directory not found: %s\n' "$src" >&2; exit 1; }
-    dir=$(project_dir)
-    mkdir -p "$dir"
+    dir=$(ensure_project_dir)
 
     for log in "$src"/*.log; do
         [ -f "$log" ] || continue
@@ -129,6 +139,30 @@ cmd_status() {
         fi
         printf '%s\t%s\t%s\t%s\n' "$name" "$type" "$size" "$age"
     done
+}
+
+cmd_list() {
+    [ -d "$TEETAP_ROOT" ] || { printf 'teetap: nothing tapped anywhere (no %s)\n' "$TEETAP_ROOT"; exit 0; }
+    now=$(date +%s)
+    printf 'PROJECT\tPATH\tSOURCES\tAGE_S\n'
+    for dir in "$TEETAP_ROOT"/*; do
+        [ -d "$dir" ] || continue
+        project=$(basename "$dir")
+        path='-'
+        [ -f "$dir/.teetap-project" ] && path=$(cat "$dir/.teetap-project")
+        sources=0
+        newest=0
+        for entry in "$dir"/*; do
+            [ -e "$entry" ] || [ -L "$entry" ] || continue
+            sources=$((sources + 1))
+            [ -e "$entry" ] || continue
+            mt=$(mtime_of "$entry")
+            [ "$mt" -gt "$newest" ] && newest=$mt
+        done
+        if [ "$newest" -gt 0 ]; then age=$((now - newest)); skey=$age; else age='-'; skey=99999999; fi
+        # Sort key first so active projects rise to the top, then strip it.
+        printf '%s\t%s\t%s\t%s\t%s\n' "$skey" "$project" "$path" "$sources" "$age"
+    done | sort -n | cut -f2-
 }
 
 # A file written within the last N seconds is treated as a live capture.
@@ -212,9 +246,35 @@ teetap status          # NAME TYPE BYTES AGE_S — what's tapped, how fresh
 tail -50 "$DIR"/dev.log
 ```
 
-**If `teetap status` shows nothing (or the directory is empty), the
-developer has not plugged in — say so and stop. Do not hunt the
-filesystem for logs.**
+If `teetap status` shows nothing here, the logs may belong to a project
+tapped from another directory — see "Choosing the project" below.
+
+## Choosing the project
+
+When this directory has no tap, consult the registry (never hunt the
+filesystem outside teetap's own directory):
+
+```sh
+teetap list            # PROJECT  PATH  SOURCES  AGE_S — most recent first
+```
+
+- **0 rows** — the developer has not plugged in anywhere. Say so and stop.
+- **1 row** — use it, stating the assumption: "Using PROJECT (PATH), the
+  only tapped project."
+- **2+ rows** — recommend one, then ASK the user; never silently pick.
+  Rank candidates by: (1) path affinity — PATH is an ancestor, descendant,
+  or sibling worktree of your cwd; (2) recency — smallest AGE_S;
+  (3) name match against the user's words.
+
+Then read from the chosen row's directory:
+
+```sh
+DIR="${TEETAP_DIR:-$HOME/.local/state/teetap}/PROJECT"
+```
+
+If `teetap list` fails as an unknown command, the installed binary
+predates it — ask the developer to re-run the install one-liner instead
+of improvising.
 
 ## Reading a log correctly
 
@@ -293,6 +353,7 @@ sources:
 inspect:
   path    print this project's log directory
   status  list sources: NAME TYPE BYTES AGE_S
+  list    list all tapped projects: PROJECT PATH SOURCES AGE_S
 
 manage:
   off [--force]
@@ -316,6 +377,7 @@ case "${1:-}" in
     run) shift; cmd_run "$@" ;;
     pm2) shift; cmd_pm2 "$@" ;;
     status) shift; cmd_status "$@" ;;
+    list) shift; cmd_list "$@" ;;
     off) shift; cmd_off "$@" ;;
     skill) shift; cmd_skill "$@" ;;
     -h|--help|'') usage ;;

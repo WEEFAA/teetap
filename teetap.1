@@ -20,6 +20,8 @@ teetap \- detachable, tee-based local log tap for agents and humans
 .br
 .B teetap status
 .br
+.B teetap list
+.br
 .B teetap off
 [\fB--force\fR]
 .br
@@ -87,6 +89,12 @@ it rather than deriving paths themselves.
 List each source as NAME, TYPE (tee file or link), BYTES, and AGE_S
 (seconds since last write). An age near zero means the source is actively
 writing.
+.TP
+.B list
+List every tapped project under the aggregate root as PROJECT, PATH
+(the source directory recorded when the project was first tapped),
+SOURCES, and AGE_S, most recently active first. Use it to find logs for
+a project that was tapped from a different working directory.
 .TP
 \fBoff\fR [\fB--force\fR]
 Detach: remove all symlinks unconditionally (targets are untouched) and

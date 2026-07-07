@@ -10,6 +10,7 @@ teetap run api -- cargo run          # runtime-agnostic — not a JavaScript too
 kubectl logs -f pod | teetap pipe pod  # or pipe any stream into the sink
 
 teetap path                          # where this project's logs live
+teetap list                          # every tapped project on this machine, freshest first
 teetap status                        # what's running, how fresh
 teetap pm2 link                      # symlink PM2's existing logs into the aggregate
 teetap off                           # detach and clean up
@@ -39,6 +40,25 @@ teetap skill install --allow-fetch   # full structure (SKILL.md + EXAMPLES.md) f
 ```
 
 The skill sources live at [skills/teetap/](skills/teetap/); a test keeps the embedded copy byte-identical to [skills/teetap/SKILL.md](skills/teetap/SKILL.md) so the fallback can never drift.
+
+### Add `~/.local/bin` to PATH
+
+macOS does not include `~/.local/bin` on PATH by default (many Linux distros don't either).
+
+**zsh** (macOS default):
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**bash**:
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+# macOS bash only: use ~/.bash_profile instead of ~/.bashrc
+```
 
 ## Design principles
 

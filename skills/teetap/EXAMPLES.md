@@ -55,10 +55,29 @@ grep -c "ERROR" "$DIR"/dev.prev.log "$DIR"/dev.log     # error count, before vs 
 ## Walkthrough: machine-wide view (everything the developer runs)
 
 ```sh
+teetap list                                    # every tapped project, freshest first
 ROOT=${TEETAP_DIR:-$HOME/.local/state/teetap}
-ls "$ROOT"                                     # one directory per project/worktree
 tail -f "$ROOT"/*/*.log                        # follow everything live
 grep -l "OOM" "$ROOT"/*/*.log                  # which project hit it?
+```
+
+## Walkthrough: the logs live in another project
+
+You are in a worktree with no tap, but the developer says the server is
+running. Find it, recommend, ask:
+
+```sh
+teetap list
+# PROJECT              PATH                              SOURCES  AGE_S
+# PMS2.0_PH-a3f9c1     /Users/dev/PMS2.0_PH              3        4
+# teetap-99be01        /Users/dev/teetap                 1        86400
+```
+
+`PMS2.0_PH-a3f9c1` is the sibling checkout and was written 4s ago — the
+likely candidate. Ask the user, recommendation first; on confirmation:
+
+```sh
+DIR="${TEETAP_DIR:-$HOME/.local/state/teetap}/PMS2.0_PH-a3f9c1"
 ```
 
 ## Taps to suggest to the developer

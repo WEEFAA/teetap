@@ -16,9 +16,35 @@ teetap status          # NAME TYPE BYTES AGE_S — what's tapped, how fresh
 tail -50 "$DIR"/dev.log
 ```
 
-**If `teetap status` shows nothing (or the directory is empty), the
-developer has not plugged in — say so and stop. Do not hunt the
-filesystem for logs.**
+If `teetap status` shows nothing here, the logs may belong to a project
+tapped from another directory — see "Choosing the project" below.
+
+## Choosing the project
+
+When this directory has no tap, consult the registry (never hunt the
+filesystem outside teetap's own directory):
+
+```sh
+teetap list            # PROJECT  PATH  SOURCES  AGE_S — most recent first
+```
+
+- **0 rows** — the developer has not plugged in anywhere. Say so and stop.
+- **1 row** — use it, stating the assumption: "Using PROJECT (PATH), the
+  only tapped project."
+- **2+ rows** — recommend one, then ASK the user; never silently pick.
+  Rank candidates by: (1) path affinity — PATH is an ancestor, descendant,
+  or sibling worktree of your cwd; (2) recency — smallest AGE_S;
+  (3) name match against the user's words.
+
+Then read from the chosen row's directory:
+
+```sh
+DIR="${TEETAP_DIR:-$HOME/.local/state/teetap}/PROJECT"
+```
+
+If `teetap list` fails as an unknown command, the installed binary
+predates it — ask the developer to re-run the install one-liner instead
+of improvising.
 
 ## Reading a log correctly
 

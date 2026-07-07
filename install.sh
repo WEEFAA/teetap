@@ -31,7 +31,15 @@ curl -fsSL "https://raw.githubusercontent.com/$REPO/$version/teetap.1" -o "$MAN_
 printf 'teetap %s installed to %s\n' "$version" "$BIN_DIR/teetap"
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
-    *) printf 'note: %s is not on your PATH\n' "$BIN_DIR" >&2 ;;
+    *)
+        printf 'note: %s is not on your PATH. Add it:\n' "$BIN_DIR" >&2
+        case "${SHELL:-}" in
+            */zsh)
+                printf '  echo '\''export PATH="$HOME/.local/bin:$PATH"'\'' >> ~/.zshrc && source ~/.zshrc\n' >&2 ;;
+            *)
+                printf '  echo '\''export PATH="$HOME/.local/bin:$PATH"'\'' >> ~/.bashrc && source ~/.bashrc\n' >&2 ;;
+        esac
+        ;;
 esac
 printf 'next (recommended): npx skills add https://github.com/%s --skill teetap\n' "$REPO"
 printf 'next (no Node):     teetap skill install   # offline; --allow-fetch for the full structure\n'
