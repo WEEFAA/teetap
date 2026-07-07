@@ -80,6 +80,26 @@ likely candidate. Ask the user, recommendation first; on confirmation:
 DIR="${TEETAP_DIR:-$HOME/.local/state/teetap}/PMS2.0_PH-a3f9c1"
 ```
 
+## Walkthrough: machine-scoped service tap
+
+For a service not tied to any repo (a gateway, a database, an assistant
+daemon), give the tap a stable directory of its own — the directory is
+the project key, so its name is what `teetap list` shows:
+
+```sh
+mkdir -p ~/taps/<service> && cd ~/taps/<service>
+
+# stream logs; the loop survives producers that exit on disconnect
+while :; do <service-log-command>; sleep 5; done | teetap pipe <host-or-instance>
+
+# one-shot probes captured as history: each run is a marked session with exit code
+teetap run health -- <service-health-command>
+grep 'exit=' "$(teetap path)"/health.log       # health timeline at a glance
+```
+
+One project per service, one source per host/instance — `grep -h` then
+correlates across all of them in a single query.
+
 ## Taps to suggest to the developer
 
 They run these, not you — any runtime, any producer:
@@ -90,6 +110,8 @@ teetap run api -- cargo run
 teetap run web -- python manage.py runserver
 kubectl logs -f mypod | teetap pipe mypod
 ssh box 'tail -f /var/log/app.log' | teetap pipe remote
+openclaw logs --follow --plain --no-color | teetap pipe gateway
+openclaw logs --follow --plain --url ws://assistant-host:18789 | teetap pipe assistant-host
 make serve 2>&1 | grep -v DEBUG | teetap pipe serve-filtered
 teetap pm2 link                                # add all PM2 workers
 teetap run --rotate dev -- npm run dev         # keep previous run in dev.prev.log

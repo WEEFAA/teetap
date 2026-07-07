@@ -16,6 +16,13 @@ teetap pm2 link                      # symlink PM2's existing logs into the aggr
 teetap off                           # detach and clean up
 ```
 
+It taps AI-agent runtimes just as well — e.g. keep an eye on an [OpenClaw](https://openclaw.ai) assistant, local or remote, and let your coding agent triage it from the tap:
+
+```sh
+openclaw logs --follow --plain --no-color | teetap pipe assistant
+openclaw logs --follow --plain --url ws://assistant-host:18789 | teetap pipe assistant-remote
+```
+
 Logs live under `~/.local/state/teetap/<project>-<hash>/`, keyed per git worktree — outside your repository, so branching, committing, and conflict resolution never touch them.
 
 ## Install
