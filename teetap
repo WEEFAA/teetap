@@ -1,0 +1,275 @@
+#!/bin/sh
+# teetap — a detachable, tee-based local log tap.
+# POSIX sh only; runtime deps: sh, tee, ln, mkdir, git, coreutils.
+set -u
+
+TEETAP_VERSION="0.1.0"
+TEETAP_ROOT="${TEETAP_DIR:-$HOME/.local/state/teetap}"
+
+project_dir() {
+    top=$(git rev-parse --show-toplevel 2>/dev/null) || top=$PWD
+    base=$(basename "$top")
+    hash=$(printf '%s' "$top" | cksum | awk '{printf "%x", $1}')
+    printf '%s/%s-%s\n' "$TEETAP_ROOT" "$base" "$hash"
+}
+
+cmd_path() {
+    project_dir
+}
+
+now_iso() {
+    date '+%Y-%m-%dT%H:%M:%S%z'
+}
+
+git_branch() {
+    git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '-'
+}
+
+write_start_marker() { # file session_id name
+    printf '===== teetap session %s start %s name=%s branch=%s cwd=%s pid=%s =====\n' \
+        "$3" "$(now_iso)" "$2" "$(git_branch)" "$PWD" "$$" >> "$1"
+}
+
+write_end_marker() { # file session_id name exit_code
+    printf '===== teetap session %s end %s name=%s exit=%s =====\n' \
+        "$3" "$(now_iso)" "$2" "$4" >> "$1"
+}
+
+cmd_pipe() {
+    name=${1:?usage: teetap pipe <name>}
+    dir=$(project_dir)
+    mkdir -p "$dir"
+    file="$dir/$name.log"
+    sid="$(date +%Y%m%dT%H%M%S).$$"
+    write_start_marker "$file" "$name" "$sid"
+    tee -a "$file"
+    write_end_marker "$file" "$name" "$sid" '-'
+}
+
+cmd_run() {
+    lifecycle=append
+    while :; do
+        case "${1:-}" in
+            --rotate) lifecycle=rotate; shift ;;
+            --truncate) lifecycle=truncate; shift ;;
+            --split) lifecycle=split; shift ;;
+            *) break ;;
+        esac
+    done
+    name=${1:?usage: teetap run [--rotate|--truncate|--split] <name> -- <cmd> [args...]}
+    shift
+    [ "${1:-}" = '--' ] || { echo 'teetap run: expected -- before the command' >&2; exit 2; }
+    shift
+    [ $# -gt 0 ] || { echo 'teetap run: no command given' >&2; exit 2; }
+
+    dir=$(project_dir)
+    mkdir -p "$dir"
+    sid="$(date +%Y%m%dT%H%M%S).$$"
+    file="$dir/$name.log"
+    case "$lifecycle" in
+        rotate) [ -f "$file" ] && mv "$file" "$dir/$name.prev.log" ;;
+        truncate) : > "$file" ;;
+        split) file="$dir/$name.$sid.log" ;;
+    esac
+    # A pipe hides the producer's exit status in POSIX sh; smuggle it out via a file.
+    ec_file=$(mktemp)
+    write_start_marker "$file" "$name" "$sid"
+    { "$@" 2>&1; echo $? > "$ec_file"; } | tee -a "$file"
+    ec=$(cat "$ec_file")
+    rm -f "$ec_file"
+    write_end_marker "$file" "$name" "$sid" "$ec"
+    exit "$ec"
+}
+
+cmd_pm2() {
+    [ "${1:-}" = 'link' ] || { echo 'usage: teetap pm2 link [name-filter...]' >&2; exit 2; }
+    shift
+    src="${TEETAP_PM2_LOGS:-$HOME/.pm2/logs}"
+    [ -d "$src" ] || { printf 'teetap: pm2 log directory not found: %s\n' "$src" >&2; exit 1; }
+    dir=$(project_dir)
+    mkdir -p "$dir"
+
+    for log in "$src"/*.log; do
+        [ -f "$log" ] || continue
+        base=$(basename "$log")
+        if [ $# -gt 0 ]; then
+            matched=0
+            for f in "$@"; do
+                case "$base" in *"$f"*) matched=1 ;; esac
+            done
+            [ "$matched" -eq 1 ] || continue
+        fi
+        ln -sf "$log" "$dir/pm2-$base"
+    done
+
+    for link in "$dir"/pm2-*; do
+        [ -L "$link" ] || continue
+        [ -e "$link" ] || rm -f "$link"
+    done
+}
+
+mtime_of() { # BSD stat and GNU stat disagree on flags; try both.
+    stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null
+}
+
+cmd_status() {
+    dir=$(project_dir)
+    [ -d "$dir" ] || { printf 'teetap: nothing tapped here (no %s)\n' "$dir"; exit 0; }
+    now=$(date +%s)
+    printf 'NAME\tTYPE\tBYTES\tAGE_S\n'
+    for entry in "$dir"/*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        name=$(basename "$entry" .log)
+        if [ -L "$entry" ]; then type=link; else type=tee; fi
+        if [ -e "$entry" ]; then
+            size=$(wc -c < "$entry" | tr -d ' ')
+            age=$(( now - $(mtime_of "$entry") ))
+        else
+            size='-'; age='-'
+        fi
+        printf '%s\t%s\t%s\t%s\n' "$name" "$type" "$size" "$age"
+    done
+}
+
+# A file written within the last N seconds is treated as a live capture.
+TEETAP_LIVE_WINDOW=10
+
+cmd_off() {
+    force=0
+    [ "${1:-}" = '--force' ] && force=1
+    dir=$(project_dir)
+    [ -d "$dir" ] || exit 0
+    now=$(date +%s)
+    for entry in "$dir"/*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        if [ -L "$entry" ]; then
+            rm -f "$entry"
+            continue
+        fi
+        age=$(( now - $(mtime_of "$entry") ))
+        if [ "$age" -lt "$TEETAP_LIVE_WINDOW" ] && [ "$force" -eq 0 ]; then
+            printf 'teetap: %s looks live (written %ss ago) — stop the process or pass --force\n' \
+                "$(basename "$entry")" "$age" >&2
+            continue
+        fi
+        rm -f "$entry"
+    done
+}
+
+cmd_skill() {
+    [ "${1:-}" = 'install' ] || { echo 'usage: teetap skill install' >&2; exit 2; }
+    dest="${TEETAP_SKILLS_DIR:-$HOME/.claude/skills}/teetap"
+    mkdir -p "$dest"
+    cat > "$dest/SKILL.md" <<'SKILL_EOF'
+---
+name: teetap
+description: Read the developer's local process logs (dev servers, PM2 workers, any piped stream) without owning the process. Use when debugging local behavior, when asked to "check the logs", "watch the server", "what happened when I...", or when you need runtime output you did not start yourself.
+---
+
+# teetap — read local process logs you don't own
+
+The developer taps their processes with `teetap`; output lands in one
+directory per project, outside the repo. You read it with tail/grep.
+
+## Quick start
+
+```sh
+DIR=$(teetap path)     # this project's log directory (never derive it yourself)
+teetap status          # NAME TYPE BYTES AGE_S — what's tapped, how fresh
+tail -50 "$DIR"/dev.log
+```
+
+**If `teetap status` shows nothing (or the directory is empty), the
+developer has not plugged in — say so and stop. Do not hunt the
+filesystem for logs.**
+
+## Reading a log correctly
+
+Files append across runs. Every run is bracketed by marker lines:
+
+```
+===== teetap session <id> start <time> name=dev branch=... cwd=... pid=... =====
+===== teetap session <id> end <time> name=dev exit=0 =====
+```
+
+Scope your reading to the CURRENT run — everything after the last start
+marker. Errors before it belong to a previous session:
+
+```sh
+awk '/teetap session .* start/{n=NR} {l[NR]=$0} END{for(i=n;i<=NR;i++) print l[i]}' "$DIR"/dev.log
+```
+
+An `exit=` value in the end marker is the wrapped command's exit code.
+
+## Workflows
+
+**What is running right now?** `teetap status` — `AGE_S` near 0 means
+actively writing; large means idle or stopped.
+
+**Follow everything live (SLS-style):** `tail -f "$DIR"/*.log`
+Machine-wide across all projects: `tail -f ${TEETAP_DIR:-$HOME/.local/state/teetap}/*/*.log`
+
+**Correlate one request across sources:** `grep -h "<id>" "$DIR"/*.log`
+PM2 workers appear as `pm2-<process>.log` symlinks — same directory,
+same grep.
+
+**Previous run:** `<name>.prev.log` (exists only if the developer used
+`--rotate`); split sessions are `<name>.<session-id>.log`.
+
+## Advanced
+
+Suggest taps to the developer (they run these, not you):
+
+```sh
+teetap run dev -- <any command>        # wrap: tees + records exit code
+<producer> 2>&1 | teetap pipe <name>   # sink: tap any stream
+teetap pm2 link                        # add PM2 logs to the aggregate
+teetap off                             # detach when done
+```
+SKILL_EOF
+    printf 'teetap: skill installed to %s\n' "$dest"
+}
+
+usage() {
+    cat <<'EOF'
+usage: teetap <command>
+
+capture:
+  run [--rotate|--truncate|--split] <name> -- <cmd> [args...]
+          wrap any command; tee output, record exit code (default: append)
+  pipe <name>
+          sink: tap any stream (producer | teetap pipe <name>)
+
+sources:
+  pm2 link [name-filter...]
+          symlink PM2 log files into this project's directory
+
+inspect:
+  path    print this project's log directory
+  status  list sources: NAME TYPE BYTES AGE_S
+
+manage:
+  off [--force]
+          remove symlinks and (non-live) capture files
+  skill install
+          install the /teetap agent skill to ~/.claude/skills
+
+environment:
+  TEETAP_DIR         aggregate root (default ~/.local/state/teetap)
+  TEETAP_PM2_LOGS    pm2 log directory (default ~/.pm2/logs)
+  TEETAP_SKILLS_DIR  agent skills directory (default ~/.claude/skills)
+EOF
+}
+
+case "${1:-}" in
+    path) shift; cmd_path "$@" ;;
+    pipe) shift; cmd_pipe "$@" ;;
+    run) shift; cmd_run "$@" ;;
+    pm2) shift; cmd_pm2 "$@" ;;
+    status) shift; cmd_status "$@" ;;
+    off) shift; cmd_off "$@" ;;
+    skill) shift; cmd_skill "$@" ;;
+    -h|--help|'') usage ;;
+    --version) printf 'teetap %s\n' "$TEETAP_VERSION" ;;
+    *) printf 'teetap: unknown command: %s\n' "$1" >&2; usage >&2; exit 1 ;;
+esac

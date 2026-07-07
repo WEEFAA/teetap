@@ -2,9 +2,9 @@
 
 A detachable, `tee`-based local log tap. Pipe or wrap any process — any runtime — and its output lands in one well-known directory outside your repo, where coding agents (and anyone else) can read it without owning the process. A local log aggregate built from `tee`, symlinks, and a directory.
 
-**Status: design phase.** The full specification lives in [docs/prd/PRD-teetap.md](docs/prd/PRD-teetap.md); architecture decisions in [docs/adr/](docs/adr/). Implementation follows the PRD.
+The full specification lives in [docs/prd/PRD-teetap.md](docs/prd/PRD-teetap.md); architecture decisions in [docs/adr/](docs/adr/).
 
-## The idea
+## Usage
 
 ```sh
 teetap run dev -- npm run dev        # wrap any command; output tees to the aggregate
@@ -19,12 +19,14 @@ teetap off                           # detach and clean up
 
 Logs live under `~/.local/state/teetap/<project>-<hash>/`, keyed per git worktree — outside your repository, so branching, committing, and conflict resolution never touch them.
 
-## Planned install
+## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/aelfestijo/teetap/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/weefaa/teetap/main/install.sh | sh
 teetap skill install   # give your coding agents the /teetap skill
 ```
+
+Installs the single script to `~/.local/bin/teetap`, pinned to the latest GitHub Release (`TEETAP_VERSION=v0.1.0` to pin). The `/teetap` agent skill is embedded in the script itself, so tool and skill can never drift.
 
 ## Design principles
 
