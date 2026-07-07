@@ -229,7 +229,7 @@ Scope your reading to the CURRENT run — everything after the last start
 marker. Errors before it belong to a previous session:
 
 ```sh
-awk '/teetap session .* start/{n=NR} {l[NR]=$0} END{for(i=n;i<=NR;i++) print l[i]}' "$DIR"/dev.log
+tail -n "+$(grep -n 'teetap session .* start' "$DIR"/dev.log | tail -1 | cut -d: -f1)" "$DIR"/dev.log
 ```
 
 An `exit=` value in the end marker is the wrapped command's exit code.

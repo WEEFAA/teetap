@@ -23,7 +23,7 @@ Aggregate like a log store's "group by":
 
 ```sh
 grep -oh "gateway:[A-Z-]*" "$DIR"/*.log | sort | uniq -c | sort -rn
-awk '/ERROR/{print $1}' "$DIR"/dev.log | uniq -c        # errors per timestamp prefix
+grep ERROR "$DIR"/dev.log | cut -d' ' -f1 | uniq -c     # errors per timestamp prefix
 ```
 
 ## Walkthrough: debug a failing request
@@ -43,7 +43,7 @@ Same identifier, one `grep -h` across both.
 ## Walkthrough: what changed since the last restart?
 
 ```sh
-awk '/teetap session .* start/{n=NR} {l[NR]=$0} END{for(i=n;i<=NR;i++) print l[i]}' "$DIR"/dev.log
+tail -n "+$(grep -n 'teetap session .* start' "$DIR"/dev.log | tail -1 | cut -d: -f1)" "$DIR"/dev.log
 ```
 
 Then compare with the previous session if the developer used `--rotate`:
