@@ -27,7 +27,7 @@ Logs live under `~/.local/state/teetap/<project>-<hash>/`, keyed per git worktre
 
 ## Install
 
-**Binary** (installs `~/.local/bin/teetap` plus its man page, pinned to the latest GitHub Release; `TEETAP_VERSION=v0.1.0` to pin):
+**Binary** — installs into the first directory already on your PATH and writable without sudo, so `teetap` works right away (`TEETAP_VERSION=v0.1.0` to pin a release, `TEETAP_BIN_DIR` to force a directory):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/weefaa/teetap/main/install.sh | sh
@@ -48,24 +48,39 @@ teetap skill install --allow-fetch   # full structure (SKILL.md + EXAMPLES.md) f
 
 The skill sources live at [skills/teetap/](skills/teetap/); a test keeps the embedded copy byte-identical to [skills/teetap/SKILL.md](skills/teetap/SKILL.md) so the fallback can never drift.
 
-### Add `~/.local/bin` to PATH
+### Add `~/.local/bin` to PATH manually
 
-macOS does not include `~/.local/bin` on PATH by default (many Linux distros don't either).
+Only needed when the installer says so — it happens when no on-PATH directory was writable and the binary fell back to `~/.local/bin`, which macOS does not include on PATH by default (many Linux distros don't either).
 
-**zsh** (macOS default):
+**macOS** (zsh is the default shell):
 
 ```sh
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-**bash**:
+Put the line in `~/.zshenv` instead if non-interactive shells also need it — coding agents and editor tasks spawn those, and they never read `~/.zshrc`.
+
+**Linux** (bash):
 
 ```sh
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
-# macOS bash only: use ~/.bash_profile instead of ~/.bashrc
 ```
+
+On Debian/Ubuntu the stock `~/.profile` already adds `~/.local/bin` when the directory exists — logging out and back in is enough.
+
+**Windows** — teetap is a POSIX `sh` script, so it runs under WSL or Git Bash, not native PowerShell:
+
+- **WSL**: follow the Linux instructions inside the distro.
+- **Git Bash**: same line, but the file is `~/.bash_profile`:
+
+  ```sh
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bash_profile
+  source ~/.bash_profile
+  ```
+
+Already-running terminals (and agent sessions, which snapshot PATH at launch) don't pick up profile edits — restart them.
 
 ## Design principles
 
