@@ -9,10 +9,14 @@ BIN_DIR="${TEETAP_BIN_DIR:-$HOME/.local/bin}"
 
 version="${TEETAP_VERSION:-}"
 if [ -z "$version" ]; then
-    version=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-        | awk -F'"' '/"tag_name"/{print $4; exit}')
+    # Resolve the tag from the releases/latest redirect: unlike api.github.com,
+    # the web endpoint is not rate-limited for anonymous callers.
+    version=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" \
+        | sed 's|.*/releases/tag/||')
 fi
-[ -n "$version" ] || { echo 'teetap install: could not resolve latest release' >&2; exit 1; }
+case "$version" in
+    ''|*/*) echo "teetap install: could not resolve a release for $REPO (does one exist?)" >&2; exit 1 ;;
+esac
 
 mkdir -p "$BIN_DIR"
 curl -fsSL "https://raw.githubusercontent.com/$REPO/$version/teetap" -o "$BIN_DIR/teetap"
