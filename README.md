@@ -2,8 +2,6 @@
 
 A detachable, `tee`-based local log tap. Pipe or wrap any process — any runtime — and its output lands in one well-known directory outside your repo, where coding agents (and anyone else) can read it without owning the process. A local log aggregate built from `tee`, symlinks, and a directory.
 
-The full specification lives in [docs/prd/PRD-teetap.md](docs/prd/PRD-teetap.md); architecture decisions in [docs/adr/](docs/adr/).
-
 ## Usage
 
 ```sh
