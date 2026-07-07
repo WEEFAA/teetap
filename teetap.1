@@ -1,0 +1,170 @@
+.TH TEETAP 1 "2026" "teetap 0.1.0" "User Commands"
+.SH NAME
+teetap \- detachable, tee-based local log tap for agents and humans
+.SH SYNOPSIS
+.B teetap run
+[\fB--rotate\fR|\fB--truncate\fR|\fB--split\fR]
+.I name
+\fB--\fR
+.I command
+[\fIargs\fR...]
+.br
+.I producer
+| \fBteetap pipe\fR
+.I name
+.br
+.B teetap pm2 link
+[\fIname-filter\fR...]
+.br
+.B teetap path
+.br
+.B teetap status
+.br
+.B teetap off
+[\fB--force\fR]
+.br
+.B teetap skill install
+.SH DESCRIPTION
+.B teetap
+captures the output of local processes to one well-known directory per
+project, outside the repository, so that coding agents and other observers
+can read it with
+.BR tail (1)
+and
+.BR grep (1)
+without owning the process. It is runtime-agnostic: it moves bytes and does
+not care what produced them.
+.PP
+Each project (git worktree) gets its own directory under the aggregate root
+(default
+.IR ~/.local/state/teetap ),
+keyed by the toplevel's basename and a hash of its absolute path. Because
+captures live outside the repository, branching, committing, and conflict
+resolution never interact with them.
+.SH COMMANDS
+.TP
+\fBrun\fR [\fB--rotate\fR|\fB--truncate\fR|\fB--split\fR] \fIname\fR \fB--\fR \fIcommand\fR [\fIargs\fR...]
+Run
+.I command
+with stderr merged into stdout, teeing output to
+.IR name .log
+in the project directory while passing it through to the terminal. The
+wrapped command's exit code is recorded in the session end marker and
+propagated as teetap's own exit status. By default output is appended;
+.B --rotate
+moves the existing log to
+.IR name .prev.log
+first,
+.B --truncate
+clobbers it in place, and
+.B --split
+writes a new
+.IR name . session-id .log
+per run.
+.TP
+\fBpipe\fR \fIname\fR
+Act as a sink: read stdin, stamp a session start marker, append through
+.BR tee (1)
+to
+.IR name .log
+while passing the stream to stdout, and stamp an end marker on EOF. Use it
+to tap producers that cannot be wrapped: pipelines, remote tails, container
+logs.
+.TP
+\fBpm2 link\fR [\fIname-filter\fR...]
+Symlink PM2's existing log files into the project directory with a
+.B pm2-
+filename prefix. All log files by default, or only those whose names match
+a given filter. Idempotent: re-running adds new files and prunes dead
+links. Output is never re-piped or duplicated.
+.TP
+.B path
+Print the project directory for the current working directory. This is the
+single authority for the naming convention; scripts and agents should use
+it rather than deriving paths themselves.
+.TP
+.B status
+List each source as NAME, TYPE (tee file or link), BYTES, and AGE_S
+(seconds since last write). An age near zero means the source is actively
+writing.
+.TP
+\fBoff\fR [\fB--force\fR]
+Detach: remove all symlinks unconditionally (targets are untouched) and
+delete capture files, except files written within the last 10 seconds,
+which are treated as live and skipped with a warning unless
+.B --force
+is given.
+.TP
+\fBskill install\fR [\fB--allow-fetch\fR]
+Install the agent skill to the skills directory (default
+.IR ~/.claude/skills/teetap )
+so coding agents know how to find and query the logs. The recommended
+onboarding is the skills.sh ecosystem:
+.PP
+.nf
+    npx skills add https://github.com/weefaa/teetap --skill teetap
+.fi
+.PP
+.B teetap skill install
+is the no-Node fallback. It is offline by default: it copies the skill
+bundled next to the script (repository checkout), or writes the SKILL.md
+embedded in the binary itself, version-locked to this release. With
+.B --allow-fetch
+it downloads the full skill structure (SKILL.md, EXAMPLES.md, any future
+files) from this binary's own release tag in a single tarball.
+.SH SESSION MARKERS
+Every capture session is bracketed in the log file by marker lines:
+.PP
+.nf
+===== teetap session <id> start <time> name=<n> branch=<b> cwd=<c> pid=<p> =====
+===== teetap session <id> end <time> name=<n> exit=<code> =====
+.fi
+.PP
+Readers should scope to the text after the last start marker to see only
+the current run.
+.SH ENVIRONMENT
+.TP
+.B TEETAP_DIR
+Aggregate root. Default:
+.IR ~/.local/state/teetap .
+.TP
+.B TEETAP_PM2_LOGS
+PM2 log directory. Default:
+.IR ~/.pm2/logs .
+.TP
+.B TEETAP_SKILLS_DIR
+Agent skills directory. Default:
+.IR ~/.claude/skills .
+.TP
+.B TEETAP_REPO
+GitHub repository used when fetching the skill standalone. Default:
+.IR weefaa/teetap .
+.SH EXAMPLES
+Tap a dev server (any runtime) and watch it live from another terminal:
+.PP
+.nf
+$ teetap run dev -- npm run dev
+$ tail -f "$(teetap path)"/dev.log
+.fi
+.PP
+Tap a stream that cannot be wrapped:
+.PP
+.nf
+$ kubectl logs -f mypod | teetap pipe mypod
+.fi
+.PP
+Query the aggregate like a log store:
+.PP
+.nf
+$ grep -h "<request-id>" "$(teetap path)"/*.log
+$ sed -n '/13:18:00/,/13:18:30/p' "$(teetap path)"/dev.log
+.fi
+.SH FILES
+.TP
+.I ~/.local/state/teetap/<project>-<hash>/
+Per-project log directory: real files from captures, symlinks from sources.
+.SH SEE ALSO
+.BR tee (1),
+.BR tail (1),
+.BR grep (1),
+.BR sed (1)

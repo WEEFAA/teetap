@@ -19,12 +19,26 @@ Logs live under `~/.local/state/teetap/<project>-<hash>/`, keyed per git worktre
 
 ## Install
 
+**Binary** (installs `~/.local/bin/teetap` plus its man page, pinned to the latest GitHub Release; `TEETAP_VERSION=v0.1.0` to pin):
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/weefaa/teetap/main/install.sh | sh
-teetap skill install   # give your coding agents the /teetap skill
 ```
 
-Installs the single script to `~/.local/bin/teetap`, pinned to the latest GitHub Release (`TEETAP_VERSION=v0.1.0` to pin). The `/teetap` agent skill is embedded in the script itself, so tool and skill can never drift.
+**Agent skill** — separate from the binary. Recommended, via the [skills.sh](https://skills.sh) ecosystem:
+
+```sh
+npx skills add https://github.com/weefaa/teetap --skill teetap
+```
+
+No-Node fallback, bundled with the binary:
+
+```sh
+teetap skill install                 # offline: embedded SKILL.md, version-locked to the binary
+teetap skill install --allow-fetch   # full structure (SKILL.md + EXAMPLES.md) from the release tag
+```
+
+The skill sources live at [skills/teetap/](skills/teetap/); a test keeps the embedded copy byte-identical to [skills/teetap/SKILL.md](skills/teetap/SKILL.md) so the fallback can never drift.
 
 ## Design principles
 

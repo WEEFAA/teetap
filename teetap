@@ -156,11 +156,44 @@ cmd_off() {
     done
 }
 
+script_dir() {
+    cd "$(dirname "$0")" && pwd
+}
+
 cmd_skill() {
-    [ "${1:-}" = 'install' ] || { echo 'usage: teetap skill install' >&2; exit 2; }
+    [ "${1:-}" = 'install' ] || { echo 'usage: teetap skill install [--allow-fetch]' >&2; exit 2; }
+    shift
+    fetch=0
+    [ "${1:-}" = '--allow-fetch' ] && fetch=1
     dest="${TEETAP_SKILLS_DIR:-$HOME/.claude/skills}/teetap"
     mkdir -p "$dest"
-    cat > "$dest/SKILL.md" <<'SKILL_EOF'
+
+    bundled="$(script_dir)/skills/teetap"
+    if [ "$fetch" -eq 1 ]; then
+        # Full skill structure from this script's own release — one tarball, no manifest.
+        repo="${TEETAP_REPO:-weefaa/teetap}"
+        url="https://github.com/$repo/archive/refs/tags/v$TEETAP_VERSION.tar.gz"
+        tmp=$(mktemp -d)
+        if curl -fsSL "$url" | tar -xz -C "$tmp" 2>/dev/null; then
+            cp -R "$tmp"/*/skills/teetap/. "$dest"/
+            rm -rf "$tmp"
+        else
+            rm -rf "$tmp"
+            printf 'teetap: could not fetch skill from %s\n' "$url" >&2
+            exit 1
+        fi
+    elif [ -f "$bundled/SKILL.md" ] && [ "$bundled" != "$dest" ]; then
+        cp -R "$bundled"/. "$dest"/
+    else
+        write_embedded_skill "$dest/SKILL.md"
+    fi
+    printf 'teetap: skill installed to %s\n' "$dest"
+}
+
+# Offline fallback for standalone installs: SKILL.md only, version-locked to
+# this binary. Must stay byte-identical to skills/teetap/SKILL.md (test-enforced).
+write_embedded_skill() {
+    cat > "$1" <<'SKILL_EOF'
 ---
 name: teetap
 description: Read the developer's local process logs (dev servers, PM2 workers, any piped stream) without owning the process. Use when debugging local behavior, when asked to "check the logs", "watch the server", "what happened when I...", or when you need runtime output you did not start yourself.
@@ -201,17 +234,29 @@ awk '/teetap session .* start/{n=NR} {l[NR]=$0} END{for(i=n;i<=NR;i++) print l[i
 
 An `exit=` value in the end marker is the wrapped command's exit code.
 
-## Workflows
+## Querying — treat the directory like a log store
+
+Prefer `grep`/`sed`/`awk` over reading whole files: they are your query
+language, and they compose into anything a hosted log store can answer.
+Never dump a large log into context — query it down first.
+
+```sh
+grep -h "<request-id>" "$DIR"/*.log            # one identifier across ALL sources
+grep -n  "ERROR\|error" "$DIR"/dev.log         # find errors, keep line numbers
+sed -n '/13:18:00/,/13:18:30/p' "$DIR"/dev.log # time-range slice
+```
+
+Chain them like query stages: filter (`grep`) → slice (`sed -n 'X,Yp'`)
+→ project/aggregate (`awk`, `sort | uniq -c | sort -rn`).
+
+`EXAMPLES.md` next to this file (present when installed via
+`npx skills add` or `teetap skill install --allow-fetch`) has the full
+recipe collection and end-to-end walkthroughs; without it, compose the
+three recipes above.
 
 **What is running right now?** `teetap status` — `AGE_S` near 0 means
-actively writing; large means idle or stopped.
-
-**Follow everything live (SLS-style):** `tail -f "$DIR"/*.log`
-Machine-wide across all projects: `tail -f ${TEETAP_DIR:-$HOME/.local/state/teetap}/*/*.log`
-
-**Correlate one request across sources:** `grep -h "<id>" "$DIR"/*.log`
-PM2 workers appear as `pm2-<process>.log` symlinks — same directory,
-same grep.
+actively writing; large means idle or stopped. PM2 workers appear as
+`pm2-<process>.log` symlinks — same directory, same queries.
 
 **Previous run:** `<name>.prev.log` (exists only if the developer used
 `--rotate`); split sessions are `<name>.<session-id>.log`.
@@ -226,8 +271,9 @@ teetap run dev -- <any command>        # wrap: tees + records exit code
 teetap pm2 link                        # add PM2 logs to the aggregate
 teetap off                             # detach when done
 ```
+
+Full command reference: `man teetap` or `teetap --help`.
 SKILL_EOF
-    printf 'teetap: skill installed to %s\n' "$dest"
 }
 
 usage() {
@@ -251,8 +297,11 @@ inspect:
 manage:
   off [--force]
           remove symlinks and (non-live) capture files
-  skill install
+  skill install [--allow-fetch]
           install the /teetap agent skill to ~/.claude/skills
+          (recommended: npx skills add https://github.com/weefaa/teetap --skill teetap)
+          offline by default; --allow-fetch pulls the full skill
+          structure from this binary's release tag
 
 environment:
   TEETAP_DIR         aggregate root (default ~/.local/state/teetap)
