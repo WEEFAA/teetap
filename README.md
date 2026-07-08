@@ -9,6 +9,10 @@ teetap run dev -- npm run dev        # wrap any command; output tees to the aggr
 teetap run api -- cargo run          # runtime-agnostic — not a JavaScript tool
 kubectl logs -f pod | teetap pipe pod  # or pipe any stream into the sink
 
+teetap run -d dev -- npm run dev     # detached: terminal back immediately
+teetap run -d db -- docker logs -f postgres  # detach a follower: wrap it instead of piping
+teetap stop dev                      # TERM, 10s grace, KILL — end marker sealed
+
 teetap path                          # where this project's logs live
 teetap list                          # every tapped project on this machine, freshest first
 teetap status                        # what's running, how fresh
@@ -86,7 +90,7 @@ Already-running terminals (and agent sessions, which snapshot PATH at launch) do
 
 - **Zero dependencies** beyond POSIX coreutils — one `#!/bin/sh` script.
 - **The filesystem is the interface** — consumers use `tail` and `grep`, not an API.
-- **Detachable** — captures live outside the repo; `off` cleans up; nothing daemonizes.
+- **Detachable** — captures live outside the repo; `off` cleans up; nothing supervises: `run -d` starts and `stop` ends, but nothing restarts or monitors.
 - **Composable sources** — `tee` writes real files, PM2 joins by symlink; a source is anything that materializes a file.
 - **Runtime-agnostic** — teetap moves bytes; it doesn't care what produced them.
 

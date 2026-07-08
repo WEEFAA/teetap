@@ -7,6 +7,7 @@
 .Sh SYNOPSIS
 .Nm
 .Cm run
+.Op Fl d
 .Op Fl -rotate | -truncate | -split
 .Ar name
 .Fl -
@@ -14,6 +15,10 @@
 .Op Ar args ...
 .Nm
 .Cm pipe
+.Ar name
+.Nm
+.Cm stop
+.Op Fl t Ar seconds
 .Ar name
 .Nm
 .Cm pm2 link
@@ -51,7 +56,7 @@ conflict resolution never interact with them.
 .Pp
 The following commands are available:
 .Bl -tag -width Ds
-.It Cm run Oo Fl -rotate | -truncate | -split Oc Ar name Fl - Ar command Op Ar args ...
+.It Cm run Oo Fl d Oc Oo Fl -rotate | -truncate | -split Oc Ar name Fl - Ar command Op Ar args ...
 Run
 .Ar command
 with stderr merged into stdout, teeing output to
@@ -71,6 +76,21 @@ clobbers it in place, and
 writes a new
 .Ar name . Ns Ar session-id Ns Pa .log
 per run.
+.Pp
+With
+.Fl d
+.Pq or Fl -detach ,
+start
+.Ar command
+detached and return immediately, printing its pid and log path instead of
+streaming; the terminal is free and closing it does not end the capture.
+Session markers are still written, including the end marker with the exit
+code when the command later exits, crashes, or is stopped.
+A name whose detached command is still running is refused.
+Detached commands are started and stopped, never supervised: nothing
+restarts on crash and no health is monitored.
+To detach a producer that would otherwise be piped, wrap it instead:
+.Dl teetap run -d pod -- kubectl logs -f pod
 .It Cm pipe Ar name
 Act as a sink: read standard input, stamp a session start marker, append
 through
@@ -81,6 +101,15 @@ while passing the stream to standard output, and stamp an end marker on
 end-of-file.
 Use it to tap producers that cannot be wrapped: pipelines, remote tails,
 container logs.
+.It Cm stop Oo Fl t Ar seconds Oc Ar name
+End a detached tap started with
+.Cm run Fl d :
+send SIGTERM to the command, wait up to
+.Ar seconds
+.Pq default 10
+for it to exit, then send SIGKILL.
+The session end marker records the resulting exit code.
+Stopping a name that is not running is not an error.
 .It Cm pm2 link Op Ar name-filter ...
 Symlink PM2's existing log files into the project directory with a
 .Dq pm2-
@@ -93,8 +122,15 @@ Print the project directory for the current working directory.
 This is the single authority for the naming convention; scripts and agents
 should use it rather than deriving paths themselves.
 .It Cm status
-List each source in this project's directory as NAME, TYPE (tee file or
-link), BYTES, and AGE_S (seconds since last write).
+List each source in this project's directory as NAME, TYPE, BYTES, and
+AGE_S (seconds since last write).
+TYPE is
+.Dq run
+while a detached command is alive,
+.Dq tee
+for other capture files, and
+.Dq link
+for symlinked sources.
 An age near zero means the source is actively writing.
 .It Cm list
 List every tapped project under the aggregate root as PROJECT, PATH (the
@@ -108,6 +144,12 @@ delete capture files, except files written within the last 10 seconds,
 which are treated as live and skipped with a warning unless
 .Fl -force
 is given.
+.Cm off
+never ends processes: a tap whose detached command is still running is
+always skipped — even with
+.Fl -force
+— with a pointer to
+.Cm stop .
 .It Cm skill install Op Fl -allow-fetch
 Install the agent skill to the skills directory (default
 .Pa ~/.claude/skills/teetap )

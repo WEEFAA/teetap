@@ -58,17 +58,30 @@ cmd_pipe() {
     write_end_marker "$file" "$name" "$sid" '-'
 }
 
+pidfile_for() { # dir name — dotfile: invisible to the "$dir"/* globs, like the breadcrumb
+    printf '%s/.teetap-pid-%s\n' "$1" "$2"
+}
+
+live_pid_for() { # dir name — prints the pid iff the detached producer is alive
+    _pid=$(cat "$(pidfile_for "$1" "$2")" 2>/dev/null) || return 1
+    [ -n "$_pid" ] || return 1
+    kill -0 "$_pid" 2>/dev/null || return 1
+    printf '%s\n' "$_pid"
+}
+
 cmd_run() {
     lifecycle=append
+    detach=0
     while :; do
         case "${1:-}" in
             --rotate) lifecycle=rotate; shift ;;
             --truncate) lifecycle=truncate; shift ;;
             --split) lifecycle=split; shift ;;
+            -d|--detach) detach=1; shift ;;
             *) break ;;
         esac
     done
-    name=${1:?usage: teetap run [--rotate|--truncate|--split] <name> -- <cmd> [args...]}
+    name=${1:?usage: teetap run [-d] [--rotate|--truncate|--split] <name> -- <cmd> [args...]}
     shift
     [ "${1:-}" = '--' ] || { echo 'teetap run: expected -- before the command' >&2; exit 2; }
     shift
@@ -82,6 +95,42 @@ cmd_run() {
         truncate) : > "$file" ;;
         split) file="$dir/$name.$sid.log" ;;
     esac
+
+    if [ "$detach" -eq 1 ]; then
+        pidfile=$(pidfile_for "$dir" "$name")
+        if oldpid=$(live_pid_for "$dir" "$name"); then
+            printf 'teetap: %s is already running (pid %s) — teetap stop %s first\n' \
+                "$name" "$oldpid" "$name" >&2
+            exit 1
+        fi
+        rm -f "$pidfile"
+        # The pidfile can't double as the started signal: a fast-exiting
+        # producer is sealed (pidfile removed) before the parent ever polls.
+        birth=$(mktemp)
+        # The wrapper outlives this invocation: it forwards TERM to the
+        # producer and writes the end marker, so marker discipline holds
+        # whether the producer exits, crashes, or is stopped.
+        (
+            write_start_marker "$file" "$name" "$sid"
+            "$@" </dev/null >> "$file" 2>&1 &
+            prod=$!
+            printf '%s\n' "$prod" > "$pidfile"
+            printf '%s\n' "$prod" > "$birth"
+            trap 'kill -TERM "$prod" 2>/dev/null' TERM
+            wait "$prod"; ec=$?
+            while kill -0 "$prod" 2>/dev/null; do wait "$prod"; ec=$?; done
+            write_end_marker "$file" "$name" "$sid" "$ec"
+            rm -f "$pidfile"
+        ) </dev/null >/dev/null 2>&1 &
+        i=0
+        while [ ! -s "$birth" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+        pid=$(cat "$birth" 2>/dev/null) || true
+        rm -f "$birth"
+        [ -n "${pid:-}" ] || { printf 'teetap run -d: %s failed to start\n' "$name" >&2; exit 1; }
+        printf '%s started (pid %s) -> %s\n' "$name" "$pid" "$file"
+        exit 0
+    fi
+
     # A pipe hides the producer's exit status in POSIX sh; smuggle it out via a file.
     ec_file=$(mktemp)
     write_start_marker "$file" "$name" "$sid"
@@ -90,6 +139,34 @@ cmd_run() {
     rm -f "$ec_file"
     write_end_marker "$file" "$name" "$sid" "$ec"
     exit "$ec"
+}
+
+cmd_stop() {
+    grace=10
+    if [ "${1:-}" = '-t' ]; then
+        grace=${2:?usage: teetap stop [-t <seconds>] <name>}
+        shift 2
+    fi
+    name=${1:?usage: teetap stop [-t <seconds>] <name>}
+    dir=$(project_dir)
+    pidfile=$(pidfile_for "$dir" "$name")
+    if ! pid=$(live_pid_for "$dir" "$name"); then
+        rm -f "$pidfile"
+        printf 'teetap: %s is not running\n' "$name" >&2
+        exit 0
+    fi
+    kill -TERM "$pid" 2>/dev/null
+    waited=0
+    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$grace" ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+    # The wrapper seals the session (end marker, pidfile removal) just after
+    # the producer dies; give it a moment so stop returns a consistent state.
+    i=0
+    while [ -f "$pidfile" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+    printf '%s stopped\n' "$name"
 }
 
 cmd_pm2() {
@@ -130,7 +207,13 @@ cmd_status() {
     for entry in "$dir"/*; do
         [ -e "$entry" ] || [ -L "$entry" ] || continue
         name=$(basename "$entry" .log)
-        if [ -L "$entry" ]; then type=link; else type=tee; fi
+        if [ -L "$entry" ]; then
+            type=link
+        elif live_pid_for "$dir" "$name" >/dev/null; then
+            type=run
+        else
+            type=tee
+        fi
         if [ -e "$entry" ]; then
             size=$(wc -c < "$entry" | tr -d ' ')
             age=$(( now - $(mtime_of "$entry") ))
@@ -178,6 +261,14 @@ cmd_off() {
         [ -e "$entry" ] || [ -L "$entry" ] || continue
         if [ -L "$entry" ]; then
             rm -f "$entry"
+            continue
+        fi
+        name=$(basename "$entry" .log)
+        # A tap teetap itself started outranks --force: stop ends processes,
+        # off only cleans files.
+        if pid=$(live_pid_for "$dir" "$name"); then
+            printf 'teetap: %s is running (pid %s) — teetap stop %s first\n' \
+                "$name" "$pid" "$name" >&2
             continue
         fi
         age=$(( now - $(mtime_of "$entry") ))
@@ -341,10 +432,13 @@ usage() {
 usage: teetap <command>
 
 capture:
-  run [--rotate|--truncate|--split] <name> -- <cmd> [args...]
+  run [-d] [--rotate|--truncate|--split] <name> -- <cmd> [args...]
           wrap any command; tee output, record exit code (default: append)
+          -d detaches: terminal back immediately, stop with `teetap stop`
   pipe <name>
           sink: tap any stream (producer | teetap pipe <name>)
+  stop [-t <seconds>] <name>
+          end a detached tap: TERM, grace (default 10s), then KILL
 
 sources:
   pm2 link [name-filter...]
@@ -375,6 +469,7 @@ case "${1:-}" in
     path) shift; cmd_path "$@" ;;
     pipe) shift; cmd_pipe "$@" ;;
     run) shift; cmd_run "$@" ;;
+    stop) shift; cmd_stop "$@" ;;
     pm2) shift; cmd_pm2 "$@" ;;
     status) shift; cmd_status "$@" ;;
     list) shift; cmd_list "$@" ;;
