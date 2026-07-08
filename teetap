@@ -6,6 +6,14 @@ set -u
 TEETAP_VERSION="0.1.2"
 TEETAP_ROOT="${TEETAP_DIR:-$HOME/.local/state/teetap}"
 
+validate_name() {
+    case "$1" in
+        '') printf 'teetap: name required\n' >&2; exit 2 ;;
+        -*) printf 'teetap: invalid name: %s (must not start with -)\n' "$1" >&2; exit 2 ;;
+        *[!a-zA-Z0-9_-]*) printf 'teetap: invalid name: %s (only a-z, A-Z, 0-9, _, - allowed)\n' "$1" >&2; exit 2 ;;
+    esac
+}
+
 project_dir() {
     top=$(git rev-parse --show-toplevel 2>/dev/null) || top=$PWD
     base=$(basename "$top")
@@ -50,6 +58,7 @@ write_end_marker() { # file session_id name exit_code
 
 cmd_pipe() {
     name=${1:?usage: teetap pipe <name>}
+    validate_name "$name"
     dir=$(ensure_project_dir)
     file="$dir/$name.log"
     sid="$(date +%Y%m%dT%H%M%S).$$"
@@ -82,6 +91,7 @@ cmd_run() {
         esac
     done
     name=${1:?usage: teetap run [-d] [--rotate|--truncate|--split] <name> -- <cmd> [args...]}
+    validate_name "$name"
     shift
     [ "${1:-}" = '--' ] || { echo 'teetap run: expected -- before the command' >&2; exit 2; }
     shift
@@ -148,6 +158,7 @@ cmd_stop() {
         shift 2
     fi
     name=${1:?usage: teetap stop [-t <seconds>] <name>}
+    validate_name "$name"
     dir=$(project_dir)
     pidfile=$(pidfile_for "$dir" "$name")
     if ! pid=$(live_pid_for "$dir" "$name"); then
@@ -271,7 +282,7 @@ cmd_flush() {
         case "$1" in
             --older-than) max_age=$(parse_age "${2:?usage: teetap flush [--older-than <age>] [--all] [name ...]}") || exit 2; shift 2 ;;
             --all) all=1; shift ;;
-            *) names="$names $1"; shift ;;
+            *) validate_name "$1"; names="$names $1"; shift ;;
         esac
     done
 
