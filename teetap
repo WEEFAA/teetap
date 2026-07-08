@@ -3,7 +3,7 @@
 # POSIX sh only; runtime deps: sh, tee, ln, mkdir, git, coreutils.
 set -u
 
-TEETAP_VERSION="0.1.0"
+TEETAP_VERSION="0.1.2"
 TEETAP_ROOT="${TEETAP_DIR:-$HOME/.local/state/teetap}"
 
 project_dir() {
