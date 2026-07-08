@@ -91,14 +91,55 @@ actively writing; large means idle or stopped. PM2 workers appear as
 **Previous run:** `<name>.prev.log` (exists only if the developer used
 `--rotate`); split sessions are `<name>.<session-id>.log`.
 
+## Stale log advisory
+
+After running `teetap status`, check `AGE_S` for every source. If any
+file looks stale, advise the developer to flush it.
+
+**Deriving the threshold:** the minimum recommended age is **4 hours**
+(14400 seconds). Derive a project-appropriate threshold from what you
+observe — a dev server that restarts every few minutes makes logs stale
+faster than a long-running worker. Use your judgement, but never
+recommend below 4h.
+
+When you spot stale files, ask the developer — never flush silently:
+
+> Some logs look stale (dev.log last written 18h ago). Want me to flush
+> them? I'd suggest: `teetap flush --older-than 6h`
+
+Adjust the `--older-than` value to your derived threshold.
+
+## Flushing logs
+
+`flush` deletes capture files without detaching the project:
+
+```sh
+teetap flush                           # all capture files in this project
+teetap flush dev                       # just dev.log
+teetap flush --older-than 6h           # only files not written to in 6h
+teetap flush --older-than 7d --all     # machine-wide, stale files only
+```
+
+Age format: `<number><unit>` — `m` (minutes), `h` (hours), `d` (days).
+
+Rules you should know:
+- **Live detached processes are always skipped** — flush will tell you to
+  `teetap stop <name>` first. Never try to force past this.
+- **Symlinks (PM2 links) are always skipped** — flush clears data, not
+  wiring. `teetap off` removes symlinks.
+- **The project directory survives** — after flush, the project is still
+  plugged in and visible in `teetap list`.
+
 ## Advanced
 
 Suggest taps to the developer (they run these, not you):
 
 ```sh
 teetap run dev -- <any command>        # wrap: tees + records exit code
+teetap run -d dev -- <any command>     # detached: terminal back immediately
 <producer> 2>&1 | teetap pipe <name>   # sink: tap any stream
 teetap pm2 link                        # add PM2 logs to the aggregate
+teetap stop dev                       # end a detached tap
 teetap off                             # detach when done
 ```
 

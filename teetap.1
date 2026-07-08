@@ -30,6 +30,11 @@
 .Nm
 .Cm list
 .Nm
+.Cm flush
+.Op Fl -older-than Ar age
+.Op Fl -all
+.Op Ar name ...
+.Nm
 .Cm off
 .Op Fl -force
 .Nm
@@ -138,6 +143,38 @@ source directory recorded when the project was first tapped), SOURCES, and
 AGE_S, most recently active first.
 Use it to find logs for a project that was tapped from a different working
 directory.
+.It Cm flush Oo Fl -older-than Ar age Oc Oo Fl -all Oc Op Ar name ...
+Delete capture files.
+Without arguments, delete all capture files in the current project.
+With
+.Ar name
+arguments, delete only named files.
+With
+.Fl -older-than ,
+keep files whose last modification is more recent than
+.Ar age
+(format:
+.Dq 30m ,
+.Dq 6h ,
+.Dq 7d ) .
+With
+.Fl -all ,
+sweep every project under the aggregate root instead of just the
+current one.
+Filters combine:
+.Dl teetap flush --older-than 6h dev api
+deletes
+.Pa dev.log
+and
+.Pa api.log
+only if stale.
+.Pp
+Symlinks (PM2 links) are never touched.
+Files with a live detached process are always skipped with a pointer to
+.Cm stop .
+The project directory and
+.Pa .teetap-project
+breadcrumb survive, so the project remains plugged in.
 .It Cm off Op Fl -force
 Detach: remove all symlinks unconditionally (targets are untouched) and
 delete capture files, except files written within the last 10 seconds,

@@ -13,6 +13,10 @@ teetap run -d dev -- npm run dev     # detached: terminal back immediately
 teetap run -d db -- docker logs -f postgres  # detach a follower: wrap it instead of piping
 teetap stop dev                      # TERM, 10s grace, KILL — end marker sealed
 
+teetap flush --older-than 6h         # delete capture files older than 6 hours
+teetap flush dev                     # delete just dev.log
+teetap flush --all --older-than 7d   # machine-wide sweep of stale logs
+
 teetap path                          # where this project's logs live
 teetap list                          # every tapped project on this machine, freshest first
 teetap status                        # what's running, how fresh
@@ -93,6 +97,15 @@ Already-running terminals (and agent sessions, which snapshot PATH at launch) do
 - **Detachable** — captures live outside the repo; `off` cleans up; nothing supervises: `run -d` starts and `stop` ends, but nothing restarts or monitors.
 - **Composable sources** — `tee` writes real files, PM2 joins by symlink; a source is anything that materializes a file.
 - **Runtime-agnostic** — teetap moves bytes; it doesn't care what produced them.
+
+## Automatic cleanup
+
+teetap never runs cleanup automatically. If you want periodic flushing, compose with cron:
+
+```sh
+# flush logs older than 7 days across all projects, every night at 2am
+echo '0 2 * * * teetap flush --all --older-than 7d' | crontab -
+```
 
 ## License
 

@@ -251,6 +251,66 @@ cmd_list() {
 # A file written within the last N seconds is treated as a live capture.
 TEETAP_LIVE_WINDOW=10
 
+parse_age() { # "30m" | "6h" | "7d" → seconds; exits 2 on bad format
+    _val=$(printf '%s' "$1" | sed 's/[mhd]$//')
+    _unit=$(printf '%s' "$1" | sed 's/^[0-9]*//')
+    case "$_val" in ''|*[!0-9]*) echo 'teetap flush: invalid age format (use e.g. 30m, 6h, 7d)' >&2; exit 2 ;; esac
+    case "$_unit" in
+        m) printf '%s\n' $((_val * 60)) ;;
+        h) printf '%s\n' $((_val * 3600)) ;;
+        d) printf '%s\n' $((_val * 86400)) ;;
+        *) echo 'teetap flush: invalid age unit (use m, h, or d)' >&2; exit 2 ;;
+    esac
+}
+
+cmd_flush() {
+    max_age=0
+    all=0
+    names=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --older-than) max_age=$(parse_age "${2:?usage: teetap flush [--older-than <age>] [--all] [name ...]}") || exit 2; shift 2 ;;
+            --all) all=1; shift ;;
+            *) names="$names $1"; shift ;;
+        esac
+    done
+
+    if [ "$all" -eq 1 ]; then
+        [ -d "$TEETAP_ROOT" ] || exit 0
+        for dir in "$TEETAP_ROOT"/*/; do
+            [ -d "$dir" ] || continue
+            _flush_dir "$dir" "$max_age" "$names"
+        done
+    else
+        dir=$(project_dir)
+        [ -d "$dir" ] || exit 0
+        _flush_dir "$dir" "$max_age" "$names"
+    fi
+}
+
+_flush_dir() { # dir max_age names
+    _dir=${1%/} _max_age=$2 _names=$3
+    now=$(date +%s)
+    for entry in "$_dir"/*; do
+        [ -e "$entry" ] || continue
+        [ -L "$entry" ] && continue
+        name=$(basename "$entry" .log)
+        if pid=$(live_pid_for "$_dir" "$name"); then
+            printf 'skipped %s: running (pid %s) — teetap stop %s first\n' "$name" "$pid" "$name" >&2
+            continue
+        fi
+        if [ -n "$_names" ]; then
+            case "$_names" in *" $name "*|*" $name") ;; *) continue ;; esac
+        fi
+        if [ "$_max_age" -gt 0 ]; then
+            age=$(( now - $(mtime_of "$entry") ))
+            [ "$age" -ge "$_max_age" ] || continue
+        fi
+        rm -f "$entry"
+        printf 'flushed %s\n' "$name"
+    done
+}
+
 cmd_off() {
     force=0
     [ "${1:-}" = '--force' ] && force=1
@@ -450,6 +510,8 @@ inspect:
   list    list all tapped projects: PROJECT PATH SOURCES AGE_S
 
 manage:
+  flush [--older-than <age>] [--all] [name ...]
+          delete capture files (age: 30m, 6h, 7d; skips symlinks + live taps)
   off [--force]
           remove symlinks and (non-live) capture files
   skill install [--allow-fetch]
@@ -473,6 +535,7 @@ case "${1:-}" in
     pm2) shift; cmd_pm2 "$@" ;;
     status) shift; cmd_status "$@" ;;
     list) shift; cmd_list "$@" ;;
+    flush) shift; cmd_flush "$@" ;;
     off) shift; cmd_off "$@" ;;
     skill) shift; cmd_skill "$@" ;;
     -h|--help|'') usage ;;

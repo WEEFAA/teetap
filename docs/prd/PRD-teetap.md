@@ -36,6 +36,22 @@ The developer pipes or wraps their processes through `teetap`, which `tee`s outp
 18. As a second/other agent, I want the same skill conventions available to me, so that every agent inspects logs identically without rediscovering the tool.
 19. As a maintainer, I want the executable to be a single POSIX sh script with zero runtime dependencies beyond coreutils, so that it runs identically on macOS, Linux, and slim CI images.
 20. As a maintainer, I want the skill versioned and shipped with the script, so that agent-facing documentation never drifts from tool behavior.
+21. As a developer, I want to delete all capture files in my current project with one command, so that I can reclaim disk space without detaching.
+22. As a developer, I want to delete a specific capture file by name, so that I can surgically remove one bloated log without touching others.
+23. As a developer, I want to delete only capture files older than a given age, so that I keep recent logs and clear stale ones.
+24. As a developer, I want to combine name and age filters, so that I can say "delete dev.log only if it hasn't been written to in 6 hours."
+25. As a developer, I want to flush all projects machine-wide with `--all`, so that I can do a single sweep across everything I've tapped.
+26. As a developer, I want to flush machine-wide with an age filter, so that I can clear stale logs everywhere without losing recent captures.
+27. As a developer, I want flush to skip files owned by a live detached process, so that I cannot accidentally break a running capture.
+28. As a developer, I want flush to tell me which files it skipped due to a live process and point me at `teetap stop`, so that I know what to do if I really want them gone.
+29. As a developer, I want flush to leave the project directory and breadcrumb intact, so that the project remains plugged in and visible in `teetap list` after cleanup.
+30. As a developer, I want flush to ignore symlinks (PM2 links), so that flushing clears data without unwiring source integrations.
+31. As a developer, I want flush to work without confirmation prompts, so that agents and scripts can call it non-interactively.
+32. As a developer, I want a compact age format (`30m`, `6h`, `7d`), so that specifying retention is terse and obvious.
+33. As an agent, I want to flush stale logs before reading, so that I only process relevant output and don't waste context on old sessions.
+34. As an agent, I want flush to be non-interactive with predictable exit codes, so that I can call it safely without human intervention.
+35. As an agent, I want the teetap skill to document flush, so that I know the command exists and how to use it without rediscovering it.
+36. As an agent, I want the skill to explain that flush skips symlinks and live processes, so that I understand what flush will and won't do.
 
 ## Implementation Decisions
 
@@ -51,19 +67,20 @@ The developer pipes or wraps their processes through `teetap`, which `tee`s outp
 - **Introspection commands.** `teetap path` prints the resolved project directory for the cwd (the single implementation of the naming convention). `teetap status` lists each source with its type (tee file vs pm2 link), size, and seconds since last write.
 - **Distribution.** `install.sh` fetched via curl installs the script (no sudo, ever) into the first directory already on `$PATH` and user-writable — `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` — falling back to `~/.local/bin` with a PATH warning. Pinned to the latest GitHub Release by default and overridable with a version environment variable. Old copies in other candidate directories are warned about, never deleted.
 - **Detached capture.** `teetap run -d <name> -- <cmd>` starts the wrapped command detached (terminal free immediately, survives terminal close, pid and log path printed); `teetap stop [-t <seconds>] <name>` ends it with TERM → grace (default 10s) → KILL. Session markers hold in both modes. `stop` ends processes; `off` cleans files and never kills. No supervision: nothing restarts on crash, nothing is monitored.
-- **Deliberate omissions.** No reader subcommands (`tail`/`grep` wrappers), no supervision or restarts (detached commands are started and stopped, never managed), no log rotation beyond `--rotate`, no npm/pip packaging, no agent-identity coupling, no re-teeing of process-manager output.
+- **Explicit flush, no automatic retention.** `teetap flush [--older-than <age>] [--all] [name ...]` deletes capture files. File-level deletion only — teetap does not rewrite files to trim old sessions. Three scopes: current project (default), named project via `--all`, machine-wide via `--all`. Age filter uses compact `<number><unit>` format (`30m`, `6h`, `7d`), combinable with name filters. Live detached processes are always skipped (no override). Symlinks are always skipped. Project directory and `.teetap-project` breadcrumb survive. No confirmation, no dry-run. The verb hierarchy: `flush` clears data, `stop` ends processes, `off` detaches.
+- **Deliberate omissions.** No reader subcommands (`tail`/`grep` wrappers), no supervision or restarts (detached commands are started and stopped, never managed), no automatic flush scheduling (compose with cron), no session-level trimming, no size-based caps, no npm/pip packaging, no agent-identity coupling, no re-teeing of process-manager output.
 
 ## Testing Decisions
 
 - **The executable is the test seam.** Tests invoke `teetap` subcommands black-box against a sandbox directory (`TEETAP_DIR` pointed at a temp dir) and assert on externally observable results: files created, marker lines present and well-formed, stdout passthrough intact, exit codes, symlink targets, `status`/`path` output. No test reaches into function internals.
-- **Behaviors covered:** `pipe` writes and passes through; markers open and close a session; `run` records exit codes and merges stderr; append vs `--rotate` vs `--truncate` vs `--split` lifecycles; `path` determinism (same cwd → same dir; different worktrees → different dirs); `pm2 link` idempotence with a faked PM2 log directory; `off` mtime guard and `--force`; empty-dir semantics.
+- **Behaviors covered:** `pipe` writes and passes through; markers open and close a session; `run` records exit codes and merges stderr; append vs `--rotate` vs `--truncate` vs `--split` lifecycles; `path` determinism (same cwd → same dir; different worktrees → different dirs); `pm2 link` idempotence with a faked PM2 log directory; `off` mtime guard and `--force`; empty-dir semantics; `flush` all files in a project, named files, `--older-than` age filter (older deleted / newer kept), combined name + age, `--all` across multiple projects, live detached process skipped, symlinks untouched, directory and breadcrumb survive, no-op exits 0, invalid age format exits 2.
 - **Harness:** a plain POSIX sh test runner in the repository (no bats, no framework — consistent with the zero-dependency criterion) plus `shellcheck` linting. Both run in CI on Linux and macOS.
 - **What makes a good test here:** it would still pass if the script were rewritten from scratch against the same command surface and file conventions.
 
 ## Out of Scope
 
 - Capturing output of processes that cannot be piped or wrapped (attaching to arbitrary running PIDs).
-- Log shipping, remote aggregation, retention policies, or rotation daemons.
+- Log shipping, remote aggregation, automatic retention policies, or rotation daemons (explicit `flush` is provided; automatic scheduling is the developer's job via cron).
 - Windows support (POSIX environments only; WSL works).
 - Structured/JSON log parsing — teetap moves bytes; interpretation belongs to consumers.
 - Claude/agent session identity integration (deliberately removed during design).
@@ -74,3 +91,5 @@ The developer pipes or wraps their processes through `teetap`, which `tee`s outp
 - Architecture decisions and their rationale are recorded as ADRs under the docs directory: filesystem-as-interface, per-worktree scoping, append-with-markers, pipe-as-primitive, symlink sources, and single-script distribution.
 - The skill follows the write-a-skill conventions: trigger-keyword description; quick start (`teetap path` → `teetap status` → tail/grep from the last session marker); workflows for correlating across sources; `pipe` documented under advanced usage; "empty directory means not plugged in — stop hunting" stated explicitly.
 - Naming: the repo, the executable, and the skill are all `teetap`, so the name a user types is the name an agent loads.
+- The verb hierarchy after flush: `flush` clears data, `stop` ends processes, `off` detaches (removes symlinks + non-live files + breadcrumb). Each verb has a disjoint contract.
+- ADR-0008 records the explicit-flush-no-daemon decision, capturing the trade-off against TTL/size-based alternatives and why they were rejected.
